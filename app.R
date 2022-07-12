@@ -11,10 +11,26 @@
 #   
 
 
-library(shiny)
+library(shiny,warn.conflicts = FALSE)
 library(tidyverse,warn.conflicts = FALSE)
 library(DT,warn.conflicts = FALSE)
 library(plotly,warn.conflicts = FALSE)
+library(lubridate,warn.conflicts = FALSE)
+library("viridis",warn.conflicts = FALSE)
+
+# Read data from past years
+past_data <- readRDS("data/indices_2014-2019.rds") %>%
+  # Standardize Site names from 2019 version to 2020 on wards
+  mutate(Site = ifelse(Site %in% c("WSG1", "WSG23"), "WSG89", Site))  %>%
+  mutate(Site = ifelse(Site %in% c("DHT"), "DHT89", Site)) %>% 
+  mutate(Site = ifelse(Site %in% c("MAT"), "MAT89", Site)) %>% 
+  mutate(Site = ifelse(Site %in% c("LMAT"), "MAT06", Site)) %>% 
+  mutate(Site = ifelse(Site %in% c("HIST"), "DHT89", Site)) %>% 
+  mutate(Site = ifelse(Site %in% c("SHB2"), "SHB89", Site)) %>% 
+  mutate(Site = ifelse(Site %in% c("MNAT"), "MNT97", Site)) %>% 
+  mutate(Site = ifelse(Site %in% c("NANT"), "MNN97", Site)) %>% 
+  # Label as previous years
+  mutate(collection_year = "Past")
 
 
 # Define UI for application----------------------------------------------------------
@@ -44,10 +60,17 @@ ui <- (fluidPage(
                                     choices= NULL)
                
                ),
-               mainPanel("Plots",
+               mainPanel(
+                 tabsetPanel(
+                 tabPanel("Plot Graphs",
                         plotlyOutput("plot_reflec"),
-                        plotlyOutput("plot_indices"))
-             ))
+                        plotlyOutput("plot_indices")),
+                 tabPanel("Compare to Past Years",
+                        plotlyOutput("plot_past_years"))
+                 )
+              )
+          )
+       )
   )
 ))
 
@@ -104,7 +127,7 @@ server <- function(input, output, session) {
     updateCheckboxGroupInput(session, inputId = "choice_block", choices = selected_b,
                              selected = before_selected)    
   })
-  
+
 #  Create the reactive data for each plots based on the selected choices
 #
   sub_data_reflec <- reactive({
@@ -125,7 +148,25 @@ server <- function(input, output, session) {
        group_by(Date, Site, Block, Treatment)%>%
        mutate(Replicate = as.character(Replicate))
    })
-
+   
+  sub_data_all <- reactive({
+    req(processed_indices(),input$choice_site,input$choice_treatment)
+    plot_past_data <- past_data %>% 
+      # Get relevant subset of data
+      #filter(Site %in% input$choice_site) %>%
+      filter(Year >= 2016) 
+    plot_data <- processed_indices() %>%
+      mutate(collection_year = "current",Year = lubridate::year(Date),
+             DOY = lubridate::yday(Date)) %>%
+      full_join(plot_past_data,by = c("Year", "Date", "Site", "Treatment", "NDVI",
+                                      "DOY","collection_year")) %>%
+      select(Site,Year,Date,DOY,Treatment,NDVI,collection_year) %>%
+      group_by(Site, Year, DOY, Date, Treatment, collection_year) %>% 
+      filter(Site %in% input$choice_site,Treatment %in% input$choice_treatment)%>%
+      summarise(sd = sd(NDVI,na.rm = T),
+                NDVI = mean(NDVI, na.rm = T))
+    return(plot_data)
+  })
   
   # Plot Output -------------------------------------------------------------
    #  TODO use plotly to plot instead of just converting plot
@@ -137,6 +178,7 @@ server <- function(input, output, session) {
       geom_line(aes(color = Replicate, linetype = Block)) +
       facet_grid(Site ~ Treatment) +
       theme_light()+
+      scale_color_viridis(discrete = TRUE, option = "D")+
       theme(legend.position = "left"))
   })
   output$plot_indices <- renderPlotly({
@@ -147,9 +189,25 @@ server <- function(input, output, session) {
        geom_point(aes(color = Replicate)) +
        facet_grid(Site ~ Treatment) +
        theme_light()+
+       scale_color_viridis(discrete = TRUE, option = "D")+
        theme(legend.position = "left"))
-   })   
-   
+   })
+  output$plot_past_years <- renderPlotly({
+    req(sub_data_all())
+    # Select all the blocks since it is an average of all the blocks. TODO hide blocks choices
+    selected_b <-unique(processed_spectra() %>% select(Block))$Block
+    updateCheckboxGroupInput(session, inputId = "choice_block", choices = selected_b,
+                             selected = selected_b)
+    plotly::ggplotly(
+      ggplot(data = sub_data_all(), aes(x = DOY,y = NDVI, color = factor(Year))) +
+        geom_point(aes(alpha = 0.5)) +
+        facet_grid(Site ~ Treatment) +
+        #formatting
+        theme_minimal() +
+        scale_color_viridis(discrete = TRUE, option = "D")
+       # scale_color_manual(values = c("red", "grey"))
+      )
+  })
 }
 
 # Run the application 
