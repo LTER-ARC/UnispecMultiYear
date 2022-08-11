@@ -201,6 +201,7 @@ server <- function(input, output, session) {
     plotly::ggplotly(
       ggplot(data = sub_data_all(), aes(x = DOY,y = NDVI, color = factor(Year))) +
         geom_point(aes(alpha = 0.5)) +
+        geom_line() +
         facet_grid(Site ~ Treatment) +
         #formatting
         theme_minimal() +
