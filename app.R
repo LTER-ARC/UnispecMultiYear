@@ -17,21 +17,20 @@ library(DT,warn.conflicts = FALSE)
 library(plotly,warn.conflicts = FALSE)
 library(lubridate,warn.conflicts = FALSE)
 library("viridis",warn.conflicts = FALSE)
+library(rstudioapi)
+library(data.table)
+source("R/helper.R",local = TRUE)
 
-# Read data from past years
-past_data <- readRDS("data/indices_2014-2019.rds") %>%
-  # Standardize Site names from 2019 version to 2020 on wards
-  mutate(Site = ifelse(Site %in% c("WSG1", "WSG23"), "WSG89", Site))  %>%
-  mutate(Site = ifelse(Site %in% c("DHT"), "DHT89", Site)) %>% 
-  mutate(Site = ifelse(Site %in% c("MAT"), "MAT89", Site)) %>% 
-  mutate(Site = ifelse(Site %in% c("LMAT"), "MAT06", Site)) %>% 
-  mutate(Site = ifelse(Site %in% c("HIST"), "DHT89", Site)) %>% 
-  mutate(Site = ifelse(Site %in% c("SHB2"), "SHB89", Site)) %>% 
-  mutate(Site = ifelse(Site %in% c("MNAT"), "MNT97", Site)) %>% 
-  mutate(Site = ifelse(Site %in% c("NANT"), "MNN97", Site)) %>% 
-  # Label as previous years
-  mutate(collection_year = "Past")
+# ---------------------------------------------------------------------------------
+# Read in data from past years and current working index.rds files ------
+#   Note:Past data have been cleaned and sites standardized
 
+  past_indices_data <- readRDS("data/indices_2014-2021.rds")
+  
+# Get current index.rds files by search for files in selected folder (sub-folder included). 
+
+  data_path <- selectDirectory(caption = "Select a folder to search for index.rds files")
+  current_indices_data <- get_current_indices(data_path)
 
 # Define UI for application----------------------------------------------------------
 ui <- (fluidPage(
@@ -43,10 +42,10 @@ ui <- (fluidPage(
                sidebarPanel(
                  # Note fileInput creates a data frame (name, size, and temporary file path of the files uploaded)
                  
-                 helpText("Load a processed spu indices rds file"),
+                 helpText("Select an indices rds file"),
                  
                  fileInput("processed_spectra",
-                   "Select a processed ...index.rds file",
+                   "Select an ...index.rds file to plot.",
                    multiple = FALSE,
                    accept = c(".rds")
                  ),
@@ -78,24 +77,33 @@ ui <- (fluidPage(
 server <- function(input, output, session) {
   
 # Read the RDS file 
-  processed_data <- reactive (readRDS(input$processed_spectra$datapath))
+  processed_data <- reactive ({
+    readRDS(input$processed_spectra$datapath) %>%
+    mutate(across(where(is.factor), as.character)) %>%  # Convert factors so we can filter
+    dplyr::filter(!Treatment %in% c("DARK", "REF")) %>%
+    mutate(Block = as.numeric(str_extract(Block, "\\d"))) # convert "B1", etc  to numeric
+  })
   
 # And unnest the spectra
   processed_spectra <- reactive({
     req(input$processed_spectra)
     processed_data() %>%
-      unnest(cols = c(Spectra)) %>%
-    dplyr::filter(!Treatment %in% c("DARK", "REF"))})
+   unnest(cols = c(Spectra)) %>%
+   mutate(across(where(is.factor), as.character)) 
+    })
   
 # And unnest the indices 
   processed_indices <- reactive({
     req(input$processed_spectra)
-    processed_data() %>%
-      unnest(cols = c(Indices)) %>%
-      dplyr::filter(!Treatment %in% c("DARK", "REF"), Index %in% c("NDVI"))%>%
-    rename(NDVI = Value)})
+    #processed_data() %>%
+      current_indices_data %>%
+     # unnest(cols = c(Indices)) %>%
+      dplyr::filter(!Treatment %in% c("DARK", "REF"))
+                    #, Index %in% c("NDVI"))%>%
+    #rename(NDVI = Value)
+      })
   
-#* Select box updates.  When a file is loaded get the sites and blocks
+#* Select box updates.  When a file is loaded, get the sites and blocks
 #* and select the first ones
   observeEvent(input$processed_spectra,{
 
@@ -137,7 +145,7 @@ server <- function(input, output, session) {
     processed_spectra() %>%
     filter(Site %in% input$choice_site,Block %in% input$choice_block,Treatment %in% input$choice_treatment) %>%
     group_by(Date, Site, Block, Treatment) %>%
-       mutate(Replicate = as.character(Replicate))
+       mutate(Replicate = as.character(Replicate), Block = as.factor(Block))
    })
    
    sub_data_indices <- reactive({
@@ -151,7 +159,7 @@ server <- function(input, output, session) {
    
   sub_data_all <- reactive({
     req(processed_indices(),input$choice_site,input$choice_treatment)
-    plot_past_data <- past_data %>% 
+    plot_past_data <- past_indices_data %>% 
       # Get relevant subset of data
       #filter(Site %in% input$choice_site) %>%
       filter(Year >= 2016) 
