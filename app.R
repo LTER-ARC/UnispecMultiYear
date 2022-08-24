@@ -9,8 +9,6 @@
 #  Mastering Shiny 10 Dynamic UI (https://mastering-shiny.org/action-dynamic.html)
 #
 #   
-
-
 library(shiny,warn.conflicts = FALSE)
 library(tidyverse,warn.conflicts = FALSE)
 library(DT,warn.conflicts = FALSE)
@@ -22,15 +20,22 @@ library(data.table)
 source("R/helper.R",local = TRUE)
 
 # ---------------------------------------------------------------------------------
-# Read in data from past years and current working index.rds files ------
-#   Note:Past data have been cleaned and sites standardized
+# Before lunching the shiny app, read in data from past years and any newer 
+#   index.rds files. Note: Past data have been cleaned and sites standardized
+#  These data objects are scoped across all sessions
 
   past_indices_data <- readRDS("data/indices_2014-2021.rds")
   
-# Get current index.rds files by search for files in selected folder (sub-folder included). 
-
-  data_path <- selectDirectory(caption = "Select a folder to search for index.rds files")
-  current_indices_data <- get_current_indices(data_path)
+#  Get newer index.rds files by searching for files in a selected folder (sub-folder included). 
+#   The function "get_current_indices" is in R/helper.R 
+  # data_path <- selectDirectory(caption = "Select a folder to search for index.rds files")
+  current_indices_data <- read_rds("data/2022_indices.rds")
+    # get_current_indices(data_path) %>%
+    # dplyr::filter(!Treatment %in% c("DARK", "REF")) %>%
+    # mutate(collection_year = "current",Year = lubridate::year(Date),
+    #        DOY = lubridate::yday(Date)) %>%
+    # select(Site,Year,Date,DOY,Treatment,NDVI,collection_year) %>%
+    # group_by(Site, Year, DOY, Date, Treatment, collection_year)
 
 # Define UI for application----------------------------------------------------------
 ui <- (fluidPage(
@@ -95,15 +100,12 @@ server <- function(input, output, session) {
 # And unnest the indices 
   processed_indices <- reactive({
     req(input$processed_spectra)
-    #processed_data() %>%
-      current_indices_data %>%
-     # unnest(cols = c(Indices)) %>%
-      dplyr::filter(!Treatment %in% c("DARK", "REF"))
-                    #, Index %in% c("NDVI"))%>%
-    #rename(NDVI = Value)
-      })
-  
-#* Select box updates.  When a file is loaded, get the sites and blocks
+    processed_data() %>%
+    unnest(cols = c(Indices)) %>%
+      dplyr::filter(Index %in% c("NDVI"))%>%
+    rename(NDVI = Value)
+  })
+#* Select box updates.  When a file is loaded, get the sites and blocks ----
 #* and select the first ones
   observeEvent(input$processed_spectra,{
 
@@ -159,18 +161,10 @@ server <- function(input, output, session) {
    
   sub_data_all <- reactive({
     req(processed_indices(),input$choice_site,input$choice_treatment)
-    plot_past_data <- past_indices_data %>% 
-      # Get relevant subset of data
-      #filter(Site %in% input$choice_site) %>%
-      filter(Year >= 2016) 
-    plot_data <- processed_indices() %>%
-      mutate(collection_year = "current",Year = lubridate::year(Date),
-             DOY = lubridate::yday(Date)) %>%
-      full_join(plot_past_data,by = c("Year", "Date", "Site", "Treatment", "NDVI",
+    plot_data <- current_indices_data %>%
+      full_join(past_indices_data,by = c("Year", "Date", "Site", "Treatment", "NDVI",
                                       "DOY","collection_year")) %>%
-      select(Site,Year,Date,DOY,Treatment,NDVI,collection_year) %>%
-      group_by(Site, Year, DOY, Date, Treatment, collection_year) %>% 
-      filter(Site %in% input$choice_site,Treatment %in% input$choice_treatment)%>%
+     filter(Site %in% input$choice_site,Treatment %in% input$choice_treatment)%>%
       summarise(sd = sd(NDVI,na.rm = T),
                 NDVI = mean(NDVI, na.rm = T))
     return(plot_data)
