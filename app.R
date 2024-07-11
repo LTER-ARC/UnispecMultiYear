@@ -86,7 +86,8 @@ server <- function(input, output, session) {
     readRDS(input$processed_spectra$datapath) %>%
     mutate(across(where(is.factor), as.character)) %>%  # Convert factors so we can filter
     dplyr::filter(!Treatment %in% c("DARK", "REF")) %>%
-    mutate(Block = as.numeric(str_extract(Block, "\\d"))) # convert "B1", etc  to numeric
+    mutate(Block = as.numeric(str_extract(Block, "\\d"))) %>% # convert "B1", etc  to numeric
+    standard_site_names()
   })
   
 # And unnest the spectra
@@ -164,7 +165,9 @@ server <- function(input, output, session) {
     plot_data <- current_indices_data %>%
       full_join(past_indices_data,by = c("Year", "Date", "Site", "Treatment", "NDVI",
                                       "DOY","collection_year")) %>%
-     filter(Site %in% input$choice_site,Treatment %in% input$choice_treatment)%>%
+      select(Site,Year,Date,DOY,Treatment,NDVI,collection_year) %>%
+      group_by(Site, Year, DOY, Date, Treatment, collection_year) %>% 
+      filter(Site %in% input$choice_site,Treatment %in% input$choice_treatment)%>%
       summarise(sd = sd(NDVI,na.rm = T),
                 NDVI = mean(NDVI, na.rm = T))
     return(plot_data)
